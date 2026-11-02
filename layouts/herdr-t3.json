@@ -19,14 +19,14 @@
             "mod": "t3-chrome"
           },
           "size": {
-            "px": 40
+            "px": 72
           },
           "window_drag": true
         },
         {
           "id": "sidebar-lists",
           "type": "stack",
-          "active": "lists",
+          "active": "focus",
           "children": [
             {
               "id": "lists",
@@ -51,7 +51,7 @@
             {
               "id": "focus",
               "type": "block",
-              "content": { "mod": "t3-focus", "props": { "newMenu": "t3-new-menu" } }
+              "content": { "mod": "t3-focus", "props": { "newMenu": "t3-new-menu", "autoSettleDays": 3, "topRow": false } }
             }
           ]
         },
