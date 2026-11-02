@@ -60,9 +60,11 @@ export default class WorkspaceChrome extends View {
         .role("button").accessibility_label(label)
         .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
         .on_click(action).child(h_flex().size(18).flex_none().items_center().justify_center()
-          .child(svg(`mods/t3-chrome/${icon}.svg`).size(16)))
+          .child(svg(icon.includes("/") ? icon : `mods/t3-chrome/${icon}.svg`).size(16)))
         .child(div().flex_1().min_w(0).truncate().child(label));
-      return v_flex().size_full().bg(t.chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(6).text_size(13)
+      return v_flex().size_full().bg(t.chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(6).gap(2).text_size(13)
+        // Projects (t3-projects): the saved folders the new menu offers, a settings page of this layout's own.
+        .child(row("projects", "mods/workspace-chrome/folder.svg", "Projects", () => openOverlay({ mod: "t3-projects", kind: "dialog", width: 600, height: 520 })))
         .child(row("settings", "settings", "Settings", () => run("app.settings"))
           .when(Boolean(updates().app.ready), el => el.child(div().size(6).rounded_full().bg(t.accent))));
     }

@@ -5,7 +5,7 @@
 // `+` opens on start in the current space; New space (props.newSpace) opens on folder.
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { theme, spaces, panes, knownAgents, run, closeOverlay, props, window, keys, shared, home, layout, exec, pickFolder } from "herdr";
+import { theme, spaces, panes, knownAgents, run, closeOverlay, openOverlay, props, window, keys, shared, setShared, home, layout, exec, pickFolder } from "herdr";
 
 const mac = () => window()?.platform === "macos";
 
@@ -106,6 +106,7 @@ export default class NewMenu extends View {
   // New space: its folder first, starting where the last new space's folder was (~/code/ say), or `path`.
   newSpace(cx, path) {
     this.target = NEW;
+    this.projectName = null;
     this.folder = null;
     this.path.set_value(path ?? localStorage.getItem("last-parent") ?? "~/");
     this.list(cx);
@@ -114,6 +115,8 @@ export default class NewMenu extends View {
 
   // Back one step: start ← spaces; a new space's start ← its folder; folder ← spaces (unless opened on it).
   back(cx) {
+    // A saved project goes back to the list it was picked from; a picked folder, to the folder step.
+    if (this.step === "start" && this.target === NEW && this.projectName) { this.projectName = null; this.folder = null; this.target = null; return this.go("spaces", null, cx); }
     if (this.step === "start" && this.target === NEW) { this.folder = null; return this.go("folder", NEW, cx); }
     if (this.step === "folder" && props()?.newSpace) return closeOverlay(props().overlay);
     if (this.step === "spaces" && this.target && this.target !== NEW) return this.go("start", this.target, cx);
@@ -151,8 +154,30 @@ export default class NewMenu extends View {
     const s = this.spaceAt(path);
     if (s) return this.go("start", s, cx);
     this.folder = path;
+    this.projectName = null;
+    // A folder picked for a new space is a project from now on, as T3 keeps a project you add (t3-projects
+    // edits and removes them).
+    const saved = shared("t3.projects") ?? [];
+    if (!saved.some((p) => p.path === path && (p.machine ?? null) === this.machine)) {
+      setShared("t3.projects", [...saved, { path, name: path.replace(/\/+$/, "").split("/").pop() || path, machine: this.machine }]);
+    }
     const h = home(), parent = path.replace(/\/[^/]+\/?$/, "/");
     localStorage.setItem("last-parent", !this.machine && h && parent.startsWith(h) ? "~" + parent.slice(h.length) : parent);
+    this.go("start", NEW, cx);
+  }
+
+  // The open space for a saved project, if any.
+  spaceFor(p) {
+    const ps = panes();
+    return spaces().find((s) => (s.machine ?? null) === (p.machine ?? null) && place(s, ps) === p.path);
+  }
+
+  // A saved project: straight to what to start in it, as a new space named as saved.
+  openProject(p, cx) {
+    this.target = NEW;
+    this.machine = p.machine ?? null;
+    this.folder = p.path;
+    this.projectName = p.name;
     this.go("start", NEW, cx);
   }
 
@@ -194,8 +219,16 @@ export default class NewMenu extends View {
       if (cur && match(cur)) out.push(label("label-current", "Current space"), spaceRow(cur));
       const others = all.filter((s) => s !== cur && match(s));
       if (others.length) out.push(label("label-others", "Other spaces"), ...others.map(spaceRow));
-      if (!out.some((r) => r.pick)) out.push(note("spaces-none", "No spaces match."));
-      out.push(sep("sep-new"), row("space-new", icon("folder-plus"), "New space…", "Pick a folder for it", shortcut("t3-chrome.newspace"), (cx) => this.newSpace(cx)));
+      // Saved projects (t3-projects) without a space open: one pick opens one, named as saved.
+      const projects = (shared("t3.projects") ?? []).filter((p) => !this.spaceFor(p) && (!ql || `${p.name} ${p.path}`.toLowerCase().includes(ql)));
+      if (projects.length) out.push(label("label-projects", "Projects"), ...projects.map((p) => {
+        const num = ++n;
+        return row(`project-${p.machine ?? ""}:${p.path}`, icon("folder"), p.name, `${p.machine ?? "This computer"} · ${short(p.path)}`, quickHint(num), (cx) => this.openProject(p, cx));
+      }));
+      if (!out.some((r) => r.pick)) out.push(note("spaces-none", "No spaces or projects match."));
+      out.push(sep("sep-new"),
+        row("space-new", icon("folder-plus"), "New space…", "Pick a folder for it", shortcut("t3-chrome.newspace"), (cx) => this.newSpace(cx)),
+        row("space-manage", icon("settings"), "Manage projects…", null, "", () => { closeOverlay(props().overlay); openOverlay({ mod: "t3-projects", kind: "dialog", width: 600, height: 520 }); }));
       return out;
     }
 
@@ -309,7 +342,7 @@ export default class NewMenu extends View {
     const what = a ? { argv: a.run, ...(task ? { task } : {}) } : {};
     // A shell can't show in the agent view; t3-tabs brings the agent view back for an agent.
     if (!a && find(layout(), "view")?.active === "agent") run("layout.select", { stack: "view", child: "main" });
-    if (this.target === NEW) run("space.new", { folder: this.folder, ...(this.machine ? { machine: this.machine } : {}), ...what, ...(a ? { tab: a.name } : {}) });
+    if (this.target === NEW) run("space.new", { folder: this.folder, ...(this.projectName ? { name: this.projectName } : {}), ...(this.machine ? { machine: this.machine } : {}), ...what, ...(a ? { tab: a.name } : {}) });
     else run("tab.new", { space: this.target.id, folder: place(this.target, panes()), ...what, ...(a ? { name: a.name } : {}) });
   }
 
@@ -357,7 +390,7 @@ export default class NewMenu extends View {
         if (into) { this.path.set_value(into); this.at = -1; this.list(cx); }
       }
       else if (e.key === "backspace" && (this.step === "start" ? empty(this.task) : this.step === "spaces" ? empty(this.search) : empty(this.path))) this.back(cx);
-      else if (/^[1-9]$/.test(e.key) && quickKey(e)) rows.filter((r) => r.pick && r.make && /^(space-[^pn]|agent-|terminal)/.test(r.key))[Number(e.key) - 1]?.pick(cx);
+      else if (/^[1-9]$/.test(e.key) && quickKey(e)) rows.filter((r) => r.pick && r.make && /^(space-[^pnm]|project-|agent-|terminal)/.test(r.key))[Number(e.key) - 1]?.pick(cx);
       else return;
       cx.stop_propagation();
       cx.notify();
@@ -395,7 +428,7 @@ export default class NewMenu extends View {
       .hover(s => s.bg(t.hover)).role("button").accessibility_label("Change space")
       .on_click((_e, cx) => (space ? this.go("spaces", null, cx) : this.back(cx)))
       .child(space ? sp(space) : svg(`${W}folder-plus.svg`).size(14).flex_none().text_color(t.muted))
-      .child(div().min_w(0).truncate().text_color(t.foreground).child(space ? space.name : `New space · ${short(this.folder)}`))
+      .child(div().min_w(0).truncate().text_color(t.foreground).child(space ? space.name : this.projectName ? `${this.projectName} · new space` : `New space · ${short(this.folder)}`))
       .child(svg(`${W}chevron-down.svg`).size(12).flex_none().text_color(t.dim));
     return frame
       .child(h_flex().h(36).flex_none().px(4).gap(8).items_center()
