@@ -17,7 +17,7 @@ function find(node, id) {
 // The sidebar shows either Spaces and Agents, or the focus list (t3-focus): a stack in the layout.
 const focusing = () => find(layout(), "sidebar-lists")?.active === "focus";
 // New space starts with its folder (t3-new-menu's folder step), not where the focused terminal is.
-const newSpace = () => openOverlay({ mod: "t3-new-menu", kind: "popup", at: "top", offset: 40, width: 520, height: 420, props: { newSpace: true } });
+const newSpace = () => openOverlay({ mod: "t3-new-menu", kind: "dialog", width: 520, height: 420, props: { newSpace: true } });
 const switchSidebar = () => run("layout.select", { stack: "sidebar-lists", child: focusing() ? "lists" : "focus" });
 
 export default class WorkspaceChrome extends View {
