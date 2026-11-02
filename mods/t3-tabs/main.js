@@ -11,6 +11,18 @@ function awake() {
   return agents().filter((a) => !put.has(a.address));
 }
 
+// Closes a pane; an agent still working or waiting on you asks first, since closing ends it.
+function closePane(pane, name, status) {
+  if (status === "working" || status === "blocked") {
+    return openOverlay({ mod: "confirm", kind: "dialog", width: 400, height: 170, props: {
+      title: `Close ${name}?`,
+      detail: status === "working" ? "It's still working. Closing ends it and its sub-agents." : "It's waiting on you. Closing ends it.",
+      command: { name: "pane.close", args: { pane } },
+    } });
+  }
+  run("pane.close", { pane });
+}
+
 // "Needs you", drawn as the agents list and pane headers draw it.
 const blockedMark = (t) => div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(11).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
 const mark = (t, s) => s === "working" ? svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)
@@ -149,6 +161,10 @@ export default class Tabs extends View {
         .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();
+    const shownAgent = agentView() ? agents().find(x => x.address === focused()?.agent) : null;
+    const shownShell = !agentView() ? ps.find(x => x.pane === focused()?.pane) : null;
+    const shownPane = shownAgent ? { pane: shownAgent.pane, name: title(shownAgent), status: shownAgent.status }
+      : shownShell ? { pane: shownShell.pane, name: title(shownShell), status: shownShell.status } : null;
     // Old saved rails and a dragged-narrow sidebar can be smaller than the window buttons.
     const lightsPadding = w?.platform === "macos" && w.titlebar === "none" && !w.fullscreen && root?.traffic_lights
       ? Math.max(8, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
@@ -159,6 +175,9 @@ export default class Tabs extends View {
       .when(Boolean(sidebar?.hidden), el => el.child(this.sidebarToggle(t, stop)))
       .child(t3 ? (agentView() ? this.agentBar(t, title, live) : this.paneBar(t, title))
         : h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(4).overflow_x_scroll().children(shown.map(item)))
+      // T3 mode: close what's shown (the agent, or the focused shell), as a tab's × does in the strip.
+      .when(t3 && Boolean(shownPane), el => el.child(button("close-shown", svg("mods/pane/close.svg").size(12), () => closePane(shownPane.pane, shownPane.name, shownPane.status))
+        .role("button").accessibility_label(`Close ${shownPane.name}`)))
       .when(Boolean(find(root, "view")), el => el.child(button("view-toggle", svg(`mods/workspace-chrome/${t3 ? "layers" : "square"}.svg`).size(14), switchView)
         .role("button").accessibility_label(t3 ? "Show tabs" : "Show one agent")))
       .child(button("tab-new", svg("mods/workspace-chrome/plus.svg").size(14), () => run("mod.open", { name: "t3-new-menu" })))

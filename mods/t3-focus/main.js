@@ -88,6 +88,18 @@ function wakes(ms, nowMs) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// Closes a pane; an agent still working or waiting on you asks first, since closing ends it.
+function closePane(pane, name, status) {
+  if (status === "working" || status === "blocked") {
+    return openOverlay({ mod: "confirm", kind: "dialog", width: 400, height: 170, props: {
+      title: `Close ${name}?`,
+      detail: status === "working" ? "It's still working. Closing ends it and its sub-agents." : "It's waiting on you. Closing ends it.",
+      command: { name: "pane.close", args: { pane } },
+    } });
+  }
+  run("pane.close", { pane });
+}
+
 // The right-click menu's items for one agent, as T3's thread menu: pin, settle, snooze, auto-settle, rename, close.
 function menuItems(addr) {
   const a = agents().find((x) => x.address === addr), term = terminals().find((k) => k.address === addr);
@@ -118,7 +130,7 @@ function menuItems(addr) {
       ? { label: "Enable auto-settle", icon: `${W}circle-check.svg`, fn: () => writeLabels(addr, { "t3.autosettle": "" }) }
       : { label: "Disable auto-settle", icon: `${W}minus.svg`, fn: () => writeLabels(addr, { "t3.autosettle": "off" }) },
     a.tab && { label: "Rename…", icon: `${W}square-pen.svg`, fn: () => run("tab.rename", { id: a.tab }) },
-    a.pane && { label: "Close pane", icon: `${W}x.svg`, fn: () => run("pane.close", { pane: a.pane }), danger: true },
+    a.pane && { label: "Close", icon: `${W}x.svg`, fn: () => closePane(a.pane, namer()(a), a.status), danger: true },
   ].filter(Boolean);
 }
 const menuHeight = (items) => 8 + items.reduce((h, it) => h + (it.sep ? 9 : it.header ? 24 : 30), 0);
