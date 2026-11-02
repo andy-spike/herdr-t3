@@ -95,7 +95,7 @@
             {
               "id": "view",
               "type": "stack",
-              "active": "main",
+              "active": "agent",
               "children": [
                 {
                   "id": "main",

@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, agents, terminals, focused, run, openOverlay, theme, window, layout, settings, nextCommand } from "herdr";
+import { spaces, panes, agents, terminals, focused, run, openOverlay, theme, window, layout, settings, nextCommand, shared, setShared } from "herdr";
 import { namer } from "./name.js";
 
 // With the focus list showing (t3-focus), an agent settled there isn't news: its done is left out.
@@ -19,7 +19,15 @@ const mark = (t, s) => s === "working" ? svg("mods/workspace-chrome/spinner.svg"
 
 // The work area is a stack in the layout: the active tab ("main"), or one agent full size ("agent").
 const agentView = () => find(layout(), "view")?.active === "agent";
-const switchView = () => run("layout.select", { stack: "view", child: agentView() ? "main" : "agent" });
+// The bar's mode, which only the toggle (or its key) changes: "t3" (the default) names what's shown instead of
+// listing tabs, and the work area follows focus between the agent view and a shell's tab; "tabs" is the plain
+// tab strip over the active tab. Shared, so it holds across restarts and every copy.
+const mode = () => shared("t3-tabs.mode") ?? "t3";
+const switchView = () => {
+  const t3 = mode() === "t3";
+  setShared("t3-tabs.mode", t3 ? "tabs" : "t3");
+  run("layout.select", { stack: "view", child: t3 ? "main" : "agent" });
+};
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -71,6 +79,17 @@ export default class Tabs extends View {
       .when(["working", "blocked", "done"].includes(a.status) && news, el => el.child(mark(t, a.status)));
   }
 
+  // T3 mode over a shell (the agent view can't show one): the bar names the focused pane, as it names an agent.
+  paneBar(t, title) {
+    const p = panes().find(x => x.pane === focused()?.pane);
+    if (!p) return div().id("agent-bar").flex_1().px(8).text_size(13).text_color(t.dim).child("Terminal");
+    const prog = p.program, space = spaces().find(s => s.tabs.some(c => c.id === p.tab));
+    return h_flex().id("agent-bar").flex_1().min_w(0).h(28).px(8).gap(8).items_center().text_size(13)
+      .when(Boolean(prog?.icon), el => el.child(prog.tint ? svg(prog.icon).size(14).text_color(t.muted) : image(prog.icon).size(14)))
+      .child(div().flex_none().max_w(320).truncate().text_color(t.foreground).child(title(p)))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(space?.name ?? ""));
+  }
+
   render() {
     const t = theme();
     const space = spaces().find(p => p.active);
@@ -87,12 +106,21 @@ export default class Tabs extends View {
     const here = new Set(spaces().find(s => s.id === f?.space)?.tabs.map(c => c.id) ?? []);
     const moved = f?.pane && this.lastPane && f.pane !== this.lastPane ? ps.find(p => p.pane === f.pane) : null;
     if (f?.pane) this.lastPane = f.pane;
-    if (agentView()) {
+    // In T3 mode the bar stays T3 whatever happens; only the work area moves: to the shell's tab for a new or
+    // focused shell, and back to the agent view as soon as focus is on an agent's pane again.
+    const t3 = mode() === "t3" && Boolean(find(layout(), "view"));
+    if (t3 && agentView()) {
       const plain = fresh.find(p => here.has(p.tab) && !isAgent(p)) ?? (moved && !isAgent(moved) ? moved : null);
       if (plain) {
         run("layout.select", { stack: "view", child: "main" });
         run("pane.focus", { pane: plain.pane });
       } else if (moved && f.agent !== moved.terminal) run("agent.focus", { terminal: moved.terminal });
+    } else if (t3) {
+      const on = f?.pane && ps.find(p => p.pane === f.pane);
+      if (on && isAgent(on)) {
+        run("layout.select", { stack: "view", child: "agent" });
+        run("agent.focus", { terminal: on.terminal });
+      }
     }
     const stop = (_e, cx) => cx.stop_propagation();
     const button = (id, label, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
@@ -127,12 +155,12 @@ export default class Tabs extends View {
       : 8;
     return h_flex().size_full().min_w(0).px(8).pl(lightsPadding).gap(4).items_center().bg(t.chrome)
       .on_mouse_up("left", () => { this.pressed = null; })
-      .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? (agentView() ? "agent.prev" : "tab.prev") : (agentView() ? "agent.next" : "tab.next")); })
+      .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? (t3 ? "agent.prev" : "tab.prev") : (t3 ? "agent.next" : "tab.next")); })
       .when(Boolean(sidebar?.hidden), el => el.child(this.sidebarToggle(t, stop)))
-      .child(agentView() ? this.agentBar(t, title, live)
+      .child(t3 ? (agentView() ? this.agentBar(t, title, live) : this.paneBar(t, title))
         : h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(4).overflow_x_scroll().children(shown.map(item)))
-      .when(Boolean(find(root, "view")), el => el.child(button("view-toggle", svg(`mods/workspace-chrome/${agentView() ? "layers" : "square"}.svg`).size(14), switchView)
-        .role("button").accessibility_label(agentView() ? "Show tabs" : "Show one agent")))
+      .when(Boolean(find(root, "view")), el => el.child(button("view-toggle", svg(`mods/workspace-chrome/${t3 ? "layers" : "square"}.svg`).size(14), switchView)
+        .role("button").accessibility_label(t3 ? "Show tabs" : "Show one agent")))
       .child(button("tab-new", svg("mods/workspace-chrome/plus.svg").size(14), () => run("mod.open", { name: "t3-new-menu" })))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/t3-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/t3-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
